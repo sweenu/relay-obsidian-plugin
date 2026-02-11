@@ -28,6 +28,35 @@
 
 	let errorLog = curryLog("LoggedIn.svelte", "error");
 
+	const endpointManager = plugin.loginManager.getEndpointManager();
+	const defaultUrl = endpointManager.getDefaultUrls().apiUrl;
+	let controlPlaneUrl = endpointManager.hasCustomEndpoints()
+		? endpointManager.getApiUrl()
+		: "";
+	let showControlPlaneInput = controlPlaneUrl !== "";
+
+	async function handleSaveControlPlaneUrl() {
+		const url = controlPlaneUrl.trim();
+		if (!url) {
+			await endpointManager.clearCustomEndpoints();
+		} else {
+			const result = await endpointManager.setEndpoints(url, url);
+			if (!result.success) {
+				new Notice(`Invalid URL: ${result.error}`);
+				return;
+			}
+		}
+		new Notice("Control plane URL saved. Reloading plugin...");
+		const app = plugin.app as any;
+		await app.plugins.disablePlugin("system3-relay");
+		await app.plugins.enablePlugin("system3-relay");
+
+                // Re-open the plugin tab so the settings view remounts after reload.
+                const setting = app.setting;
+                await setting.open();
+                await setting.openTabById("system3-relay");
+        }
+
 	let lm: LoginManager;
 	let automaticFlow = writable<boolean>(!Platform.isIosApp);
 	let pending = writable<boolean>(false);
@@ -434,9 +463,51 @@
 		</p>
 	{/if}
 	<WelcomeFooter />
+	<div class="control-plane-section">
+		{#if showControlPlaneInput}
+			<div class="control-plane-input">
+				<input
+					type="text"
+					placeholder={defaultUrl}
+					bind:value={controlPlaneUrl}
+				/>
+				<button
+					class="mod-cta system3-button"
+					on:click={handleSaveControlPlaneUrl}
+				>
+					Save
+				</button>
+			</div>
+		{:else}
+			<button
+				class="link link-button"
+				on:click={() => { showControlPlaneInput = true; }}
+			>
+				Set custom control plane URL
+			</button>
+		{/if}
+	</div>
 {/if}
 
 <style>
+	.control-plane-section {
+		text-align: center;
+		margin-top: 1rem;
+		font-size: 0.85em;
+		color: var(--text-muted);
+	}
+
+	.control-plane-input {
+		display: flex;
+		gap: 0.5rem;
+		justify-content: center;
+		max-width: 480px;
+		margin: 0 auto;
+	}
+
+	.control-plane-input input {
+		flex: 1;
+	}
 	.continue {
 		font-weight: 600;
 		font-size: larger;

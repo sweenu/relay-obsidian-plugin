@@ -197,6 +197,67 @@
 	onMount(() => {
 		loadDefaultTenantInfo();
 	});
+
+	// Custom endpoint overrides for self-hosted deployments
+	const endpointManager = plugin.loginManager.getEndpointManager();
+	let customApiUrl = plugin.endpointSettings.get().apiUrl || "";
+	let customAuthUrl = plugin.endpointSettings.get().authUrl || "";
+	let customEndpointError = "";
+	let isSavingCustom = false;
+
+	function validateCustomUrl(url: string): { isValid: boolean; error: string } {
+		if (!url.trim()) return { isValid: true, error: "" };
+		try {
+			const parsed = new URL(url);
+			const isDev = endpointManager.isStaging();
+			if (isDev) {
+				if (parsed.protocol !== "https:" && parsed.protocol !== "http:")
+					return { isValid: false, error: "Only HTTP and HTTPS URLs are allowed" };
+			} else {
+				if (parsed.protocol !== "https:")
+					return { isValid: false, error: "Only HTTPS URLs are allowed in production" };
+			}
+			if (parsed.hostname.length < 3) return { isValid: false, error: "Invalid hostname" };
+			return { isValid: true, error: "" };
+		} catch {
+			return { isValid: false, error: "Invalid URL format" };
+		}
+	}
+
+	$: customApiValidation = validateCustomUrl(customApiUrl);
+	$: customAuthValidation = validateCustomUrl(customAuthUrl);
+	$: customEndpointsValid = customApiValidation.isValid && customAuthValidation.isValid;
+
+	async function saveCustomEndpoints() {
+		if (!customEndpointsValid) return;
+		isSavingCustom = true;
+		customEndpointError = "";
+		try {
+			const result = await endpointManager.setEndpoints(
+				customApiUrl.trim() || undefined,
+				customAuthUrl.trim() || undefined,
+			);
+			if (result.success) {
+				hasChanges = true;
+				forceUpdate();
+			} else {
+				customEndpointError = result.error || "Failed to save";
+			}
+		} catch (error) {
+			customEndpointError = error instanceof Error ? error.message : "Unknown error";
+		} finally {
+			isSavingCustom = false;
+		}
+	}
+
+	async function resetCustomEndpoints() {
+		customApiUrl = "";
+		customAuthUrl = "";
+		customEndpointError = "";
+		await endpointManager.clearCustomEndpoints();
+		hasChanges = true;
+		forceUpdate();
+	}
 </script>
 
 <div class="endpoint-config-modal">
@@ -305,6 +366,62 @@
 				</div>
 			{/each}
 		</div>
+	</div>
+
+	<!-- Custom Endpoint Overrides -->
+	<SettingItemHeading name="Self-Hosted Endpoints" />
+	<div class="setting-item-description" style="margin-bottom: 8px;">
+		<p>Override API and Auth URLs for self-hosted deployments. Leave empty to use defaults.</p>
+	</div>
+
+	<SettingItem
+		name="API URL"
+		description="Default: {defaultUrls.apiUrl}"
+	>
+		<input
+			type="text"
+			placeholder={defaultUrls.apiUrl}
+			bind:value={customApiUrl}
+			class="endpoint-url-input"
+			class:endpoint-input-invalid={!customApiValidation.isValid}
+			title={customApiValidation.error}
+		/>
+	</SettingItem>
+
+	<SettingItem
+		name="Auth URL"
+		description="Default: {defaultUrls.authUrl}"
+	>
+		<input
+			type="text"
+			placeholder={defaultUrls.authUrl}
+			bind:value={customAuthUrl}
+			class="endpoint-url-input"
+			class:endpoint-input-invalid={!customAuthValidation.isValid}
+			title={customAuthValidation.error}
+		/>
+	</SettingItem>
+
+	{#if customEndpointError}
+		<div class="error-banner">
+			<div class="error-content">
+				<span class="error-icon">⚠️</span>
+				<span class="error-text">{customEndpointError}</span>
+			</div>
+		</div>
+	{/if}
+
+	<div class="custom-endpoint-actions">
+		{#if endpointManager.hasCustomEndpoints()}
+			<button class="mod-warning" on:click={resetCustomEndpoints}>Reset to defaults</button>
+		{/if}
+		<button
+			class="mod-cta"
+			on:click={saveCustomEndpoints}
+			disabled={!customEndpointsValid || isSavingCustom}
+		>
+			{isSavingCustom ? "Saving..." : "Save Endpoints"}
+		</button>
 	</div>
 
 	<!-- Apply Button -->
@@ -489,6 +606,13 @@
 			opacity: 1;
 			transform: translateY(0);
 		}
+	}
+
+	.custom-endpoint-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: 12px;
 	}
 
 	.apply-section {
