@@ -57,6 +57,8 @@ export interface TenantConfig {
 export interface EndpointSettings {
 	tenants?: TenantConfig[];  // List of configured tenants
 	activeTenantId?: string;  // ID of currently active tenant
+	apiUrl?: string;  // Custom API URL for self-hosted deployments
+	authUrl?: string;  // Custom Auth URL for self-hosted deployments
 	_lastValidationError?: string;
 	_lastValidationAttempt?: number;
 }
@@ -192,14 +194,14 @@ export class EndpointManager {
 	 * Get the current API URL - either validated custom URL or default
 	 */
 	getApiUrl(): string {
-		return this._validatedApiUrl || API_URL;
+		return this.settings.get().apiUrl || this._validatedApiUrl || API_URL;
 	}
 
 	/**
 	 * Get the current AUTH URL - either validated custom URL or default
 	 */
 	getAuthUrl(): string {
-		return this._validatedAuthUrl || AUTH_URL;
+		return this.settings.get().authUrl || this._validatedAuthUrl || AUTH_URL;
 	}
 
 	/**
@@ -975,5 +977,37 @@ export class EndpointManager {
 		}
 	}
 
+	hasCustomEndpoints(): boolean {
+		const s = this.settings.get();
+		return !!(s.apiUrl || s.authUrl);
+	}
+
+	async setEndpoints(apiUrl?: string, authUrl?: string): Promise<{ success: boolean; error?: string }> {
+		try {
+			if (apiUrl) this.validateUrl(apiUrl);
+			if (authUrl) this.validateUrl(authUrl);
+
+			await this.settings.update((current) => ({
+				...current,
+				apiUrl: apiUrl || undefined,
+				authUrl: authUrl || undefined,
+			}));
+
+			this.log("Custom endpoints updated", { apiUrl: this.getApiUrl(), authUrl: this.getAuthUrl() });
+			return { success: true };
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "Unknown error";
+			return { success: false, error: message };
+		}
+	}
+
+	async clearCustomEndpoints(): Promise<void> {
+		await this.settings.update((current) => ({
+			...current,
+			apiUrl: undefined,
+			authUrl: undefined,
+		}));
+		this.log("Cleared custom endpoints");
+	}
 
 }
