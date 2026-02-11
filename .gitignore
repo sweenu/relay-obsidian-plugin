@@ -74,3 +74,6 @@ obsidian-versions/
 playwright/
 slots/
 .staging-only
+
+# Nix
+result
