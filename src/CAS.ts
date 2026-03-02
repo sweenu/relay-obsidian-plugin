@@ -6,10 +6,25 @@ import { customFetch } from "./customFetch";
 import PocketBase from "pocketbase";
 import { HasLogging } from "./debug";
 
-
 export class ContentAddressedStore extends HasLogging {
 	private pb: PocketBase;
 	private tokenStore: LiveTokenStore;
+
+	private async parseJsonBody(
+		response: Response,
+	): Promise<Record<string, unknown>> {
+		const responseText = await response.text();
+		if (!responseText.trim()) {
+			return {};
+		}
+		try {
+			return JSON.parse(responseText) as Record<string, unknown>;
+		} catch (_error) {
+			throw new Error(
+				`Invalid JSON response (${response.status}) from CAS endpoint`,
+			);
+		}
+	}
 
 	constructor(private sharedFolder: SharedFolder) {
 		super();
@@ -56,8 +71,18 @@ export class ContentAddressedStore extends HasLogging {
 				`[${this.sharedFolder.path}] File is missing: ${syncFile.guid} ${syncFile.meta.hash} ${syncFile.meta.type}`,
 			);
 		}
-		const responseJson = await response.json();
+		if (response.status !== 200) {
+			throw new Error(
+				`[${this.sharedFolder.path}] Failed to get download URL: HTTP ${response.status}`,
+			);
+		}
+		const responseJson = await this.parseJsonBody(response);
 		const presignedUrl = responseJson.downloadUrl;
+		if (typeof presignedUrl !== "string" || !presignedUrl) {
+			throw new Error(
+				`[${this.sharedFolder.path}] Missing downloadUrl in CAS response`,
+			);
+		}
 		const downloadResponse = await customFetch(presignedUrl);
 		return downloadResponse.arrayBuffer();
 	}
@@ -79,11 +104,26 @@ export class ContentAddressedStore extends HasLogging {
 			method: "POST",
 			headers: { Authorization: `Bearer ${token.token}` },
 		});
-		const responseJson = await response.json();
+		if (response.status === 204) {
+			// Some endpoints return no body when upload can be skipped
+			return;
+		}
+		const responseJson = await this.parseJsonBody(response);
 		if (response.status !== 200) {
-			throw new Error(responseJson.error);
+			const error = responseJson.error;
+			if (typeof error === "string" && error.trim()) {
+				throw new Error(error);
+			}
+			throw new Error(
+				`[${this.sharedFolder.path}] Failed to get upload URL: HTTP ${response.status}`,
+			);
 		}
 		const presignedUrl = responseJson.uploadUrl;
+		if (typeof presignedUrl !== "string" || !presignedUrl) {
+			throw new Error(
+				`[${this.sharedFolder.path}] Missing uploadUrl in CAS response`,
+			);
+		}
 		await customFetch(presignedUrl, {
 			method: "PUT",
 			headers: { "Content-Type": syncFile.mimetype },
