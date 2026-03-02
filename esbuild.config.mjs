@@ -27,7 +27,7 @@ const getGitTag = () => {
 		return "dev";
 	}
 };
-const gitTag = getGitTag();
+const gitTag = process.env.RELEASE_TAG || getGitTag();
 
 const develop = process.argv[2] === "develop";
 const staging = process.argv[2] === "staging";
