@@ -14,7 +14,7 @@ if you want to view the source, please visit the github repository of this plugi
 */
 `;
 
-const gitTag = execSync("git describe --tags --always", {
+const gitTag = process.env.RELEASE_TAG || execSync("git describe --tags --always", {
 	encoding: "utf8",
 }).trim();
 
