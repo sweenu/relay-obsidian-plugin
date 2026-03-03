@@ -535,7 +535,7 @@ export class LoginManager extends Observable<LoginManager> {
 				}
 				this.pb
 					.collection("code_exchange")
-					.getOne(provider.info.state.slice(0, 15))
+					.getOne(provider.info.state.slice(0, 15).toLowerCase())
 					.then((response) => {
 						if (response) {
 							clearInterval(timer);
