@@ -170,6 +170,7 @@ export class LoginManager extends Observable<LoginManager> {
 	user?: User;
 	resolve?: (code: string) => Promise<RecordAuthResponse<RecordModel>>;
 	private endpointManager: EndpointManager;
+        private activePolls = new Map<string, Promise<RecordAuthResponse<RecordModel>>>();
 
 	constructor(
 		vaultName: string,
@@ -518,34 +519,107 @@ export class LoginManager extends Observable<LoginManager> {
 	}
 
 	async poll(provider: Provider): Promise<RecordAuthResponse<RecordModel>> {
-		let counter = 0;
-		const interval = 1000;
-		return new Promise((resolve, reject) => {
-			const timer = setInterval(() => {
-				counter += 1;
-				if (counter >= 30) {
-					clearInterval(timer);
-					return reject(
-						new Error(
-							`Auth timeout: Timed out after ${
-								(counter * interval) / 1000
-							} seconds`,
-						),
-					);
-				}
-				this.pb
-					.collection("code_exchange")
-					.getOne(provider.info.state.slice(0, 15))
-					.then((response) => {
-						if (response) {
-							clearInterval(timer);
-							return resolve(provider.login(response.code));
-						}
-					})
-					.catch((e) => {});
-			}, interval);
-		});
-	}
+		const interval = 250;
+		const timeoutMs = 45000;
+		const startedAt = Date.now();
+                const recordId = provider.info.state.slice(0, 15).toLowerCase();
+
+                const existingPoll = this.activePolls.get(recordId);
+                if (existingPoll) {
+                        return existingPoll;
+                }
+
+                let checking = false;
+                let settled = false;
+                let lastTriedCode = "";
+                const pollPromise = new Promise<RecordAuthResponse<RecordModel>>((resolve, reject) => {
+                        const fail = (error: Error) => {
+                                if (settled) {
+                                        return;
+                                }
+                                settled = true;
+                                clearInterval(timer);
+				reject(error);
+                        };
+
+                        const tick = async () => {
+                                if (settled || checking) {
+                                        return;
+                                }
+
+                                const elapsedMs = Date.now() - startedAt;
+                                if (elapsedMs >= timeoutMs) {
+                                        return fail(
+                                                new Error(
+                                                        `Auth timeout: Timed out after ${Math.floor(elapsedMs / 1000)} seconds`,
+                                                ),
+                                        );
+                                }
+
+                                checking = true;
+                                try {
+                                        const response = await this.pb
+                                                .collection("code_exchange")
+                                                .getOne(recordId);
+
+                                        const code = response?.code as string | undefined;
+                                        if (!code || code === lastTriedCode) {
+                                                return;
+                                        }
+
+                                        const updatedAt = response?.updated
+                                                ? Number(response.updatedUnix || Date.parse(response.updated))
+                                                : 0;
+                                        // Ignore stale records from prior auth attempts.
+                                        if (updatedAt > 0 && updatedAt + 2000 < startedAt) {
+                                                return;
+                                        }
+
+                                        lastTriedCode = code;
+                                        try {
+                                                const authData = await provider.login(code);
+                                                if (settled) {
+                                                        return;
+                                                }
+                                                settled = true;
+                                                clearInterval(timer);
+                                                resolve(authData);
+                                        } catch (error: any) {
+                                                const errorText = `${error?.message ?? ""} ${error?.originalError?.message ?? ""} ${error?.originalError?.response?.data?.message ?? ""} ${error?.originalError?.response?.data?.details ?? ""}`.toLowerCase();
+                                                const status = Number(error?.status ?? error?.originalError?.status ?? 0);
+                                                if (status === 400 || errorText.includes("invalid_grant") || errorText.includes("code not found")) {
+                                                        // One-time code already used or stale; wait for a newer callback update.
+                                                        this.pb
+                                                                .collection("code_exchange")
+                                                                .delete(recordId)
+                                                                .catch(() => {});
+                                                        lastTriedCode = "";
+                                                        return;
+                                                }
+                                                fail(error instanceof Error ? error : new Error(String(error)));
+                                        }
+                                } catch (e) {
+                                        // Keep polling until callback arrives or timeout.
+                                } finally {
+                                        checking = false;
+                                }
+                        };
+
+                        const timer = setInterval(() => {
+                                void tick();
+                        }, interval);
+                        void tick();
+                });
+
+                this.activePolls.set(recordId, pollPromise);
+                pollPromise.finally(() => {
+                        if (this.activePolls.get(recordId) === pollPromise) {
+                                this.activePolls.delete(recordId);
+                        }
+                });
+
+                return pollPromise;
+        }
 
 	async login(provider: string): Promise<boolean> {
 		this.beforeLogin();
