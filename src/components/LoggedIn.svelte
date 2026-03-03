@@ -58,7 +58,9 @@
         }
 
 	let lm: LoginManager;
-	let automaticFlow = writable<boolean>(!Platform.isIosApp);
+	const isAndroid =
+		typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
+	let automaticFlow = writable<boolean>(!Platform.isMobile && !isAndroid);
 	let pending = writable<boolean>(false);
 	lm = plugin.loginManager;
 	let timedOut = writable<boolean>(false);
@@ -292,7 +294,18 @@
 		const cached = loadCachedProviders();
 		cachedProviders.set(cached);
 		initiate();
-	});
+
+                const onVisibilityChange = () => {
+                        if (!document.hidden && $pending && $selectedProvider) {
+                                void poll($selectedProvider);
+                        }
+                };
+
+                document.addEventListener("visibilitychange", onVisibilityChange);
+                return () => {
+                        document.removeEventListener("visibilitychange", onVisibilityChange);
+                };
+        });
 
 	async function poll(providerName: string) {
 		const provider = providers[providerName];
