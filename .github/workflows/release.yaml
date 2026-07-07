@@ -26,18 +26,22 @@ jobs:
       with:
         node-version: '20.x'
     - run: npm ci
-    - run: npm run release
+    # Build into dist/ so esbuild.config.mjs stamps RELEASE_TAG into the
+    # manifest — with the default out dir (".") it skips the version update
+    # to avoid dirtying the checked-in manifest.json, and the release would
+    # ship a stale manifest version.
+    - run: npm run release -- dist
       env:
         RELEASE_TAG: ${{ steps.tag.outputs.release_tag }}
     - name: Generate artifact attestations
       uses: actions/attest@v4
       with:
         subject-path: |
-          main.js
-          styles.css
-          manifest.json
+          dist/main.js
+          dist/styles.css
+          dist/manifest.json
     - uses: ncipollo/release-action@v1
       with:
-        artifacts: "main.js,styles.css,manifest.json"
+        artifacts: "dist/main.js,dist/styles.css,dist/manifest.json"
         tag: ${{ steps.tag.outputs.release_tag }}
         name: ${{ steps.tag.outputs.release_name }}
