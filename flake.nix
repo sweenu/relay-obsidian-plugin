@@ -17,7 +17,7 @@
           pkgs = nixpkgs.legacyPackages.${system};
           relay-obsidian-plugin = pkgs.buildNpmPackage rec {
             pname = "relay-obsidian-plugin";
-            version = "0.7.4";
+            version = "0.8.5";
 
             src = pkgs.lib.fileset.toSource {
               root = ./.;
@@ -36,15 +36,12 @@
                   );
             };
 
-            npmDepsHash = "sha256-SB3lIaR4fYBQLcYRjQHkG70QYpelR8xdqXVCNLL2fKo=";
+            npmDepsHash = "sha256-6aUroPu5yPTs7zKSSalF1ZpKRrHeF5aYuHaTWveupTU=";
             makeCacheWritable = true;
 
-            postPatch = ''
-              substituteInPlace esbuild.config.mjs \
-                --replace-fail 'execSync("git describe --tags --always", {' "" \
-                --replace-fail $'\tencoding: "utf8",' "" \
-                --replace-fail '}).trim()' '"${version}"'
-            '';
+            # esbuild.config.mjs reads RELEASE_TAG before falling back to
+            # `git describe`, which is unavailable in the nix sandbox.
+            env.RELEASE_TAG = version;
 
             npmBuildScript = "release";
             dontNpmInstall = true;
