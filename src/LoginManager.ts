@@ -230,12 +230,43 @@ export class LoginManager extends Observable<LoginManager> {
 					this.getFlags();
 				})
 				.catch((response) => {
-					if (response.status === 404) {
-						this.logout();
+					if (response?.status === 404) {
+						this.confirmAccountIsGone(response);
 					}
 				});
 		}
 		RelayInstances.set(this, "loginManager");
+	}
+
+	/**
+	 * A 404 on the startup user lookup used to sign the user out on the spot.
+	 * PocketBase answers 404 for a deleted account, but so does a reverse
+	 * proxy that isn't up yet, a stale auth URL, or a captive portal — and
+	 * signing out discards the stored token, which is the whole session.
+	 *
+	 * Corroborate with a token refresh before throwing it away: PocketBase
+	 * only refuses that once the token no longer resolves to a record. A
+	 * distinct request key keeps it from auto-cancelling the startup refresh.
+	 */
+	private confirmAccountIsGone(lookupError: unknown) {
+		this.pb
+			.collection("users")
+			.authRefresh({ requestKey: "auth-refresh-account-check" })
+			.then(() => {
+				this.log(
+					"User lookup returned 404 but the session is still valid; keeping it",
+					lookupError,
+				);
+			})
+			.catch((reason) => {
+				const status = (reason as { status?: number } | undefined)?.status;
+				if (status === 401 || status === 403 || status === 404) {
+					this.log("Account no longer exists on the server; signing out", reason);
+					this.logout();
+					return;
+				}
+				this.log("Unable to confirm the account; keeping the session", reason);
+			});
 	}
 
 	private updateNetworkMetricDomains(): void {
