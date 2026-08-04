@@ -191,6 +191,19 @@ export interface LoginSettings {
 	provider: string | undefined;
 }
 
+const REFRESH_INTERVAL_MS = 86400000; // 24 hours
+
+// The auth token is the whole session — there is no refresh token — so a
+// refresh that fails leaves the stored token counting down to its original
+// expiry. Retry a handful of times before falling back to the daily interval,
+// which covers the common case of Obsidian starting before the network is up.
+const REFRESH_RETRY_DELAYS_MS = [
+	30 * 1000, // 30s
+	2 * 60 * 1000, // 2m
+	10 * 60 * 1000, // 10m
+	30 * 60 * 1000, // 30m
+];
+
 export class LoginManager extends Observable<LoginManager> {
 	pb: PocketBase;
 	private openSettings: () => Promise<void>;
@@ -199,6 +212,8 @@ export class LoginManager extends Observable<LoginManager> {
 	user?: User;
 	resolve?: (code: string) => Promise<RecordAuthResponse<RecordModel>>;
 	private endpointManager: EndpointManager;
+	private refreshRetryTimer?: number;
+	private refreshRetries = 0;
 
 	constructor(
 		vaultName: string,
@@ -228,7 +243,7 @@ export class LoginManager extends Observable<LoginManager> {
 			return { url, options };
 		};
 		this.refreshToken();
-		timeProvider.setInterval(() => this.refreshToken(), 86400000);
+		timeProvider.setInterval(() => this.refreshToken(), REFRESH_INTERVAL_MS);
 		this.unsubscribes.push(
 			FeatureFlagManager.getInstance().on(() => {
 				if (!this.pb.authStore.isValid) return;
@@ -264,6 +279,12 @@ export class LoginManager extends Observable<LoginManager> {
 	}
 
 	refreshToken() {
+		this.cancelRefreshRetry();
+		this.refreshRetries = 0;
+		this.attemptRefreshToken();
+	}
+
+	private attemptRefreshToken() {
 		if (this.pb.authStore.isValid) {
 			const pb = this.pb;
 			this.user = this.makeUser(pb.authStore);
@@ -274,6 +295,7 @@ export class LoginManager extends Observable<LoginManager> {
 					if (this.pb !== pb) {
 						return;
 					}
+					this.refreshRetries = 0;
 					this.user = this.makeUser(pb.authStore);
 					this.notifyListeners();
 					const token = authData.token;
@@ -302,7 +324,44 @@ export class LoginManager extends Observable<LoginManager> {
 				})
 				.catch((reason) => {
 					this.log("Token refresh failed", reason);
+					this.scheduleRefreshRetry(reason);
 				});
+		}
+	}
+
+	/**
+	 * Retry a failed token refresh with a backoff.
+	 *
+	 * Only transient failures are worth retrying: a request the SDK
+	 * auto-cancelled has been superseded by a newer one, and a refusal from
+	 * the server (401/403) means the token itself is dead, which the normal
+	 * expiry handling already covers.
+	 */
+	private scheduleRefreshRetry(reason: unknown) {
+		const status = (reason as { status?: number } | undefined)?.status;
+		const isAbort = (reason as { isAbort?: boolean } | undefined)?.isAbort;
+		if (isAbort || status === 401 || status === 403) {
+			return;
+		}
+		const delay = REFRESH_RETRY_DELAYS_MS[this.refreshRetries];
+		if (delay === undefined) {
+			this.log("Token refresh retries exhausted; waiting for the next cycle");
+			return;
+		}
+		this.refreshRetries += 1;
+		this.log(
+			`Retrying token refresh in ${delay / 1000}s (attempt ${this.refreshRetries})`,
+		);
+		this.refreshRetryTimer = this.timeProvider.setTimeout(() => {
+			this.refreshRetryTimer = undefined;
+			this.attemptRefreshToken();
+		}, delay);
+	}
+
+	private cancelRefreshRetry() {
+		if (this.refreshRetryTimer !== undefined) {
+			this.timeProvider.clearTimeout(this.refreshRetryTimer);
+			this.refreshRetryTimer = undefined;
 		}
 	}
 
@@ -485,6 +544,7 @@ export class LoginManager extends Observable<LoginManager> {
 	}
 
 	logout() {
+		this.cancelRefreshRetry();
 		this.pb.cancelAllRequests();
 		void this.pb.realtime.unsubscribe();
 		this.pb.authStore.clear();
@@ -678,6 +738,7 @@ export class LoginManager extends Observable<LoginManager> {
 	}
 
 	destroy() {
+		this.cancelRefreshRetry();
 		this.pb.cancelAllRequests();
 		void this.pb.realtime.unsubscribe();
 		this.pb = null as unknown as typeof this.pb;
