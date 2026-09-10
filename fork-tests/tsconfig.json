@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["jest", "node"],
+    // @tsconfig/svelte turns this on, but ts-jest compiles these tests to
+    // CommonJS, which the flag forbids.
+    "verbatimModuleSyntax": false,
+    "baseUrl": "..",
+    "paths": {
+      "src/*": ["src/*"]
+    },
+    "noEmit": true
+  },
+  "include": ["../fork-tests/**/*.ts", "../src/**/*.ts", "../relay-plugin-api.d.ts"]
+}
