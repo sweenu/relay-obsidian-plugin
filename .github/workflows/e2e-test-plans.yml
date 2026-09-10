@@ -1,10 +1,8 @@
 name: E2E scripted test plans
 
+# Fork: the automatic triggers are removed. This drives Obsidian on a private
+# GCP VM fleet using No-Instructions' secrets, which this fork does not have.
 on:
-  push:
-    branches: [main]
-    tags:
-      - '*.*.*'
   workflow_dispatch:
     inputs:
       ref:

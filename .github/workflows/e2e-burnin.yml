@@ -18,13 +18,9 @@ run-name: >-
   burn-in ${{ inputs.tests || 'default' }}
   @ ${{ inputs.ref || 'origin/main' }}
 
+# Fork: the nightly schedule is removed. The burn-in leases VMs from
+# No-Instructions' private pool, so on this fork it only failed every night.
 on:
-  schedule:
-    # 08:29 UTC nightly — an off-minute clear of the 09:17 platform-smoke cron
-    # and the top-of-hour Actions congestion. Finishes before the smokes start;
-    # burn-in and the smokes draw from disjoint fleets (pool VMs vs hosted
-    # runners), so they never contend.
-    - cron: '29 8 * * *'
   workflow_dispatch:
     inputs:
       ref:

@@ -1,10 +1,11 @@
 name: Unit Tests
 
+# Fork: the automatic triggers are removed. This runs the git-crypt encrypted
+# `__tests__/` suite on a private GCP VM using No-Instructions' secrets, none of
+# which this fork has, so every run failed. `fork-tests.yaml` covers the patches
+# this fork carries. Kept dispatch-only rather than deleted to keep the rebase
+# onto upstream clean.
 on:
-  push:
-    branches: [main]
-    tags:
-      - '*.*.*'
   workflow_dispatch:
     inputs:
       ref:
